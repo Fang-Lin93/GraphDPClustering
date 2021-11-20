@@ -41,7 +41,7 @@ plt.title('Adjacency Matrix')
 plt.show()
 
 # find cliques
-laplacian = scipy.sparse.csr_matrix.todense(nx.laplacian_matrix(G,weight=1))
+laplacian = scipy.sparse.csr_matrix.todense(nx.laplacian_matrix(G, weight=1))
 u, s, v = scipy.linalg.svd(laplacian)
 
 fig, axe = plt.subplots(figsize=(20, 10))
