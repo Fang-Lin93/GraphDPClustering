@@ -29,14 +29,14 @@ def pairwise_distance(max_id, distFunc, directed=False):
     return res
 
 
-def spectral_c(G):
-    # laplacian = scipy.sparse.csr_matrix.todense(nx.laplacian_matrix(G, weight=1))
-    # u, s, v = scipy.linalg.svd(laplacian)
-    s = nx.laplacian_spectrum(G)
-    s.sort()
-    sns.scatterplot(np.arange(len(s)), s)
-    plt.title('Spectral Clustering')
-    plt.show()
+# def spectral_c(G):
+#     # laplacian = scipy.sparse.csr_matrix.todense(nx.laplacian_matrix(G, weight=1))
+#     # u, s, v = scipy.linalg.svd(laplacian)
+#     s = nx.laplacian_spectrum(G)
+#     s.sort()
+#     sns.scatterplot(np.arange(len(s)), s)
+#     plt.title('Spectral Clustering')
+#     plt.show()
 
 
 def local_density(max_id, dist_dict, dc=None):
@@ -137,16 +137,6 @@ def cluster(max_id, rho, delta, dist_dict, rho_threshold, delta_threshold, max_c
     return pred_tags, centers
 
 
-class DistanceFunc(object):
-    def __init__(self):
-        pass
-
-
-class DensityFunc(object):
-    def __init__(self, distF=None):
-        pass
-
-
 class DPClustering(object):
     def __init__(self, data: np.array, tags: list):
         """
@@ -160,27 +150,69 @@ class DPClustering(object):
         self.rho = []
         self.delta = []
         self.dc = None
+        self.rho_dist = {}
+        self.delta_dist = {}
+        self.assign_dist = {}
         self.num_pred_clusters = None
         self.rho_threshold = None
         self.delta_threshold = None
         self.pred_tags = []
         self.pred_centers = {}
+        self.align = {}
+        self.use_km = False
+
+    def reset(self):
+        self.rho = []
+        self.delta = []
+        self.dc = None
+        self.num_pred_clusters = None
+        self.rho_threshold = None
+        self.delta_threshold = None
+        self.pred_tags = []
+        self.pred_centers = {}
+        self.align = {}
 
     def run(self, rho_dist, delta_dist, assign_dist=None, **kwargs):
         """
         dist_dict: dist_dict[(i, j)] = d(i, j)
         """
-        self.rho_threshold = kwargs.get('rho_threshold')
-        self.delta_threshold = kwargs.get('delta_threshold')
         if assign_dist is None:
             assign_dist = rho_dist
+
+        self.reset()
+        self.rho_dist = rho_dist
+        self.delta_dist = delta_dist
+        self.assign_dist = assign_dist
+
         self.rho, self.dc = local_density(self.max_id, rho_dist)
         self.delta = centrality(self.max_id, self.rho, delta_dist)
-        self.pred_tags, self.pred_centers = cluster(self.max_id, self.rho, self.delta, assign_dist, **kwargs)
-                                                    # rho_threshold=rho_threshold,
-                                                    # delta_threshold=delta_threshold,
-                                                    # max_clusters=max_clusters)
+
+        return self.re_cluster(**kwargs)
+
+    def re_cluster(self, **kwargs):
+        self.rho_threshold = kwargs.get('rho_threshold')
+        self.delta_threshold = kwargs.get('delta_threshold')
+        self.pred_tags, self.pred_centers = cluster(self.max_id, self.rho, self.delta, self.assign_dist, **kwargs)
         self.num_pred_clusters = len(self.pred_centers)
+        self.use_km = False
+        self.align_prediction()
+        return self.pred_tags, self.pred_centers
+
+    def k_means(self, data, n_clusters):
+        """
+        data: no.array of shape Nxp
+        """
+        # self.reset()
+        from sklearn.cluster import KMeans
+        km = KMeans(n_clusters=n_clusters).fit(data)
+        self.pred_tags = km.labels_.tolist()
+
+        self.pred_centers = {np.argmin([np.linalg.norm(x-c) for x in data]): v
+                             for v, c in enumerate(km.cluster_centers_)}
+        self.num_pred_clusters = len(self.pred_centers)
+
+        self.use_km = True
+        self.align_prediction()
         return self.pred_tags, self.pred_centers
 
     def eval(self):
@@ -201,20 +233,23 @@ class DPClustering(object):
         """
         true_clusters, pred_clusters = self.get_clusters()
         not_aligned = list(range(self.num_true_clusters))
-        pred_clusters.sort(key=len, reverse=True)
+        c_ids = np.argsort([len(_) for _ in pred_clusters])[::-1]
+        # pred_clusters.sort(key=len, reverse=True)
 
-        align = []
-        for c in pred_clusters:
-            pos = int(np.argmin([self.balanced_error_rate(c, true_clusters[n_]) for n_ in not_aligned]))
-            align.append(not_aligned.pop(pos))
+        align = {v: v for v in range(self.num_pred_clusters)}
+        for c in c_ids:
+            pos = int(np.argmin([self.balanced_error_rate(pred_clusters[c], true_clusters[n_]) for n_ in not_aligned]))
+            align[c] = not_aligned.pop(pos)
             if not not_aligned:  # if it predicts more clusters than needed -> keep extra labels
                 assert self.num_pred_clusters >= self.num_true_clusters
-                align += [len(align) + _ for _ in range(self.num_pred_clusters - self.num_true_clusters)]
+                # align += [len(align) + _ for _ in range(self.num_pred_clusters - self.num_true_clusters)]
                 break
 
-        for c_, t_ in zip(pred_clusters, align):
-            for i_ in c_:
-                self.pred_tags[i_] = t_
+        self.align = align
+
+        # for c_, t_ in zip(pred_clusters, align):
+        #     for i_ in c_:
+        #         self.pred_tags[i_] = t_
 
     def get_clusters(self):
         true_clusters = [[] for _ in range(self.num_true_clusters)]
@@ -238,12 +273,13 @@ class DPClustering(object):
         ax[0, 0].get_legend().remove()
         ax[0, 0].set_title('data')
 
-        sns.scatterplot(x=x_, y=y_, hue=[str(_) for _ in self.pred_tags], ax=ax[1, 0])
+        sns.scatterplot(x=x_, y=y_, hue=[str(self.align[_]) for _ in self.pred_tags], ax=ax[1, 0])
         center_x = [x_[c] for c in self.pred_centers.keys()]
         center_y = [y_[c] for c in self.pred_centers.keys()]
-        sns.scatterplot(x=center_x, y=center_y, ax=ax[1, 0], marker='+', color='black', s=400)
+        sns.scatterplot(x=center_x, y=center_y, ax=ax[1, 0],
+                        marker='+', color='black' if not self.use_km else 'red', s=400)
         ax[1, 0].get_legend().remove()
-        ax[1, 0].set_title(f'pred |clusters|={self.num_pred_clusters}, dc={self.dc:.5f}')
+        ax[1, 0].set_title(f'pred |clusters|={self.num_pred_clusters} ' + f'dc={self.dc}' if self.dc is not None else '')
 
         sns.scatterplot(x=self.rho, y=self.delta, hue=[str(_) for _ in self.tags], ax=ax[0, 1])
         ax[0, 1].set_xlabel('rho (density)')
@@ -253,8 +289,8 @@ class DPClustering(object):
             ax[0, 1].axhline(y=self.delta_threshold, color='b', linestyle='--')
         # plot selected centers:
         centers = list(self.pred_centers.keys())
-        sns.scatterplot(x=[self.rho[p] for p in centers], y=[self.delta[p] for p in centers], marker='+',
-                        ax=ax[0, 1], color='black', s=400)
+        sns.scatterplot(x=[self.rho[p] for p in centers], y=[self.delta[p] for p in centers], ax=ax[0, 1],
+                        marker='+', color='black' if not self.use_km else 'red', s=400)
         ax[0, 1].get_legend().remove()
         ax[0, 1].set_title('delta-rho')
 
