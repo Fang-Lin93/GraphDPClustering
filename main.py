@@ -12,6 +12,17 @@ def shortest_path_len(G, i, j):
     return nx.shortest_path_length(G, i, j)
 
 
+def add_edges(ax, G, pos, **kwargs):
+    nx.draw_networkx_edges(G, pos,
+                           alpha=kwargs.get('alpha', 0.1),
+                           width=kwargs.get('width', 1),
+                           ax=ax[0, 0])
+    nx.draw_networkx_edges(G, pos,
+                           alpha=kwargs.get('alpha', 0.1),
+                           width=kwargs.get('width', 1),
+                           ax=ax[1, 0])
+
+
 def cluster_plot(G, pos, true_tags, pred_tags, node_size=400, edge_width=1, label=True, show=True, desc='', **kwargs):
     # large plots
     fig, ax = plt.subplots(1, 2, figsize=(30, 15))
@@ -44,9 +55,10 @@ def cluster_plot(G, pos, true_tags, pred_tags, node_size=400, edge_width=1, labe
 
 
 def SpectralDP(G, pos, tags, N_communities, desc='Karate', **kwargs):
+
     laplacian = scipy.sparse.csr_matrix.todense(nx.normalized_laplacian_matrix(G, weight=1))
     u, s, v = scipy.linalg.svd(laplacian)
-    fig, ax = plt.subplots(figsize=(20, 10))
+    fig, ax = plt.subplots(figsize=(15, 6))
     sns.scatterplot(x=np.arange(len(s)), y=s[::-1], ax=ax)
     ax.set_title('Graph Spectrum')
     fig.show()
@@ -66,21 +78,15 @@ def SpectralDP(G, pos, tags, N_communities, desc='Karate', **kwargs):
            rho_threshold=kwargs.get('rho_threshold', 5),
            delta_threshold=kwargs.get('delta_threshold', 0.2),
            gamma=use_gamma,
+           gauss=kwargs.get('gauss', True),
            avg_rho_range=kwargs.get('avg_rho_range', (0.01, 0.02)))
 
-    run_fig, run_ax = DP.plot(show=False, threshold=not use_gamma)
-    if kwargs.get('plot_edge', True):
-        nx.draw_networkx_edges(G, pos,
-                               alpha=kwargs.get('alpha', 0.1),
-                               width=kwargs.get('width', 1),
-                               ax=run_ax[0, 0])
-        nx.draw_networkx_edges(G, pos,
-                               alpha=kwargs.get('alpha', 0.1),
-                               width=kwargs.get('width', 1),
-                               ax=run_ax[1, 0])
-    run_fig.show()
-    run_fig.savefig(f'results/{desc}_run.png')
-
+    # run_fig, run_ax = DP.plot(show=False, threshold=not use_gamma)
+    # if kwargs.get('plot_edge', True):
+    #     add_edges(run_ax, G, pos, **kwargs)
+    #
+    # run_fig.savefig(f'results/{desc}.png')
+    #
     entropy, purity = DP.eval()
     fig, _ = cluster_plot(G, pos, tags, [DP.align[_] for _ in DP.pred_tags], desc=f'DP: entropy={entropy:.3f}, purity={purity:.3f}', **kwargs)
     fig.savefig(f'results/{desc}_large.png')
@@ -88,8 +94,34 @@ def SpectralDP(G, pos, tags, N_communities, desc='Karate', **kwargs):
     return DP, u
 
 
+def spiral_cluster():
+    pos = np.loadtxt('data/spiral.txt')
+    tags = [int(_)-1 for _ in pos[:, 2]]
+    pos = pos[:, :2]
+    # dist_dict = {(int(i)-1, int(j)-1): d for i, j, d in np.loadtxt('data/spiral_distance.txt')}
+    dist_dict = pairwise_distance(len(pos) - 1, lambda x, y: np.linalg.norm(pos[x] - pos[y]))
+
+    N_communities = len(set(tags))
+
+    dp = DPClustering(pos, tags)
+    dp.run(rho_dist=dist_dict,
+           delta_dist=dist_dict,
+           max_clusters=N_communities,
+           rho_threshold=8,
+           delta_threshold=5,
+           gamma=True,
+           gauss=True)
+    entropy, purity = dp.eval()
+    dp.plot(show=True, threshold=False, desc=f'DP: entropy={entropy:.3f}, purity={purity:.3f}')
+
+    # compare to k-means
+    dp.k_means(pos, N_communities)
+    entropy, purity = dp.eval()
+    dp.plot(show=True, threshold=False, desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}')
+
+
 def rand_cluster():
-    G = nx.random_partition_graph([15, 5, 10, 10, 5], 0.8, 0.1, seed=0)
+    G = nx.random_partition_graph([15, 15, 10], 0.8, 0.2, seed=0)
     # G = nx.planted_partition_graph(5, 10, 0.5, 0.1, seed=0)
     tags = [G.nodes[v]['block'] for v in G]
 
@@ -101,15 +133,29 @@ def rand_cluster():
     pos = nx.spring_layout(G)
 
     # Spectral Density Peak Clustering
-    dp, embed = SpectralDP(G, pos, tags, N_communities, desc='Rand',
-                           gamma=False, rho_threshold=2, delta_threshold=0.3, avg_rho_range=(0.1, 0.2))
+    dp, embed = SpectralDP(G, pos, tags, N_communities, desc='rand',
+                           gamma=True, rho_threshold=2, delta_threshold=0.3, avg_rho_range=(0.01, 0.02))
     print(dp.eval())
+
+    entropy, purity = dp.eval()
+    fig, ax = dp.plot(show=False, threshold=False, desc=f'DP: entropy={entropy:.3f}, purity={purity:.3f}')
+    add_edges(ax, G, pos)
+    fig.show()
+    fig.savefig(f'results/rand_dp.png')
 
     # compare to k-means
     dp.k_means(embed, N_communities)
     entropy, purity = dp.eval()
-    fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags], desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}')
+    fig, ax = dp.plot(show=False, threshold=False, desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}')
+    add_edges(ax, G, pos)
+    fig.show()
     fig.savefig(f'results/rand_k_means.png')
+
+    # compare to k-means
+    # dp.k_means(embed, N_communities)
+    # entropy, purity = dp.eval()
+    # fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags], desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}')
+    # fig.savefig(f'results/rand_k_means.png')
 
 
 def karate_cluster():
@@ -123,15 +169,29 @@ def karate_cluster():
     pos = nx.spring_layout(G)
 
     # Spectral Density Peak Clustering
-    dp, embed = SpectralDP(G, pos, tags, N_communities, desc='Karate',
-                           gamma=False, rho_threshold=5, delta_threshold=0.15, avg_rho_range=(0.1, 0.2))
+    dp, embed = SpectralDP(G, pos, tags, N_communities, desc='karate',
+                           gamma=True, rho_threshold=5, delta_threshold=0.15)
     print(dp.eval())
+
+    entropy, purity = dp.eval()
+    fig, ax = dp.plot(show=False, threshold=False, desc=f'DP: entropy={entropy:.3f}, purity={purity:.3f}')
+    add_edges(ax, G, pos)
+    fig.show()
+    fig.savefig(f'results/karate_dp.png')
 
     # compare to k-means
     dp.k_means(embed, N_communities)
     entropy, purity = dp.eval()
-    fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags], desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}')
+    fig, ax = dp.plot(show=False, threshold=False, desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}')
+    add_edges(ax, G, pos)
+    fig.show()
     fig.savefig(f'results/karate_k_means.png')
+
+    # compare to k-means
+    # dp.k_means(embed, N_communities)
+    # entropy, purity = dp.eval()
+    # fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags], desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}')
+    # fig.savefig(f'results/karate_k_means.png')
 
 
 def email_cluster():
@@ -170,12 +230,24 @@ def email_cluster():
                            gamma=True, rho_threshold=0, delta_threshold=1.5, avg_rho_range=(0.005, 0.01))
     print(dp.eval())
 
+    entropy, purity = dp.eval()
+    fig, ax = dp.plot(show=False, threshold=False, desc=f'DP: entropy={entropy:.3f}, purity={purity:.3f}')
+    fig.show()
+    fig.savefig(f'results/email_dp.png')
+
     # compare to k-means
     dp.k_means(embed, N_communities)
     entropy, purity = dp.eval()
-    fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags],
-                          desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}', node_size=10, label=False)
+    fig, ax = dp.plot(show=False, threshold=False, desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}')
+    fig.show()
     fig.savefig(f'results/email_k_means.png')
+
+    # compare to k-means
+    # dp.k_means(embed, N_communities)
+    # entropy, purity = dp.eval()
+    # fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags],
+    #                       desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}', node_size=10, label=False)
+    # fig.savefig(f'results/email_k_means.png')
 
 
 def facebook_cluster():
@@ -206,13 +278,25 @@ def facebook_cluster():
     tags = [communities[v] for v in G]
 
     # Spectral Density Peak Clustering
-    dp, embed = SpectralDP(G, pos, tags, N_communities, desc='Facebook', node_size=10, label=False, plot_edge=False,
+    dp, embed = SpectralDP(G, pos, tags, N_communities, desc='facebook', node_size=10, label=False, plot_edge=False,
                            gamma=True, rho_threshold=100, delta_threshold=0.02,  avg_rho_range=(0.005, 0.01))
     print(dp.eval())
+
+    entropy, purity = dp.eval()
+    fig, ax = dp.plot(show=False, threshold=False, desc=f'DP: entropy={entropy:.3f}, purity={purity:.3f}')
+    fig.show()
+    fig.savefig(f'results/facebook_dp.png')
 
     # compare to k-means
     dp.k_means(embed, N_communities)
     entropy, purity = dp.eval()
-    fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags],
-                          desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}', node_size=10, label=False)
-    fig.savefig(f'results/fb_k_means.png')
+    fig, ax = dp.plot(show=False, threshold=False, desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}')
+    fig.show()
+    fig.savefig(f'results/facebook_k_means.png')
+
+    # compare to k-means
+    # dp.k_means(embed, N_communities)
+    # entropy, purity = dp.eval()
+    # fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags],
+    #                       desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}', node_size=10, label=False)
+    # fig.savefig(f'results/fb_k_means.png')

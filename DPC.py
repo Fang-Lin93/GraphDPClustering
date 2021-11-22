@@ -29,44 +29,46 @@ def pairwise_distance(max_id, distFunc, directed=False):
     return res
 
 
-# def spectral_c(G):
-#     # laplacian = scipy.sparse.csr_matrix.todense(nx.laplacian_matrix(G, weight=1))
-#     # u, s, v = scipy.linalg.svd(laplacian)
-#     s = nx.laplacian_spectrum(G)
-#     s.sort()
-#     sns.scatterplot(np.arange(len(s)), s)
-#     plt.title('Spectral Clustering')
-#     plt.show()
+def range_dc_select(max_id, dist_dict, avg_rho_range=(0.01, 0.02)):
+    avg_rho, dc = 0, -1
+    d_max, d_min = max(dist_dict.values()), min(dist_dict.values())
+    d_range = d_max - d_min
+    while (d_max - d_min) / d_range > 0.001:  # binary search
+        dc = (d_max + d_min) / 2
+        avg_rho = sum([1 for v in dist_dict.values() if v < dc]) / (max_id + 1) ** 2
+        if avg_rho < avg_rho_range[0]:
+            d_min = dc
+        elif avg_rho > avg_rho_range[1]:
+            d_max = dc
+        else:
+            break
+        assert d_max > d_min
+    print('avg_rho=', avg_rho, 'dc=', dc)
+    return dc
 
 
-def local_density(max_id, dist_dict, dc=None, avg_rho_range=(0.1, 0.2)):
+def local_density(max_id, dist_dict, gauss=True):
     """
     dc = None will automatically choose dc as shown in the paper
     """
-    if dc is None:
-        avg_rho = 0
-        d_max, d_min = max(dist_dict.values()), min(dist_dict.values())
-        d_range = d_max - d_min
-        while (d_max - d_min) / d_range > 0.001:  # binary search
-            dc = (d_max + d_min) / 2
-            avg_rho = sum([1 for v in dist_dict.values() if v < dc]) / (max_id + 1) ** 2
-            if avg_rho < avg_rho_range[0]:
-                d_min = dc
-            elif avg_rho > avg_rho_range[1]:
-                d_max = dc
-            else:
-                break
-            assert d_max > d_min
-
-        print('avg_rho=', avg_rho)
+    # if dc is None:
+    #     range_dc_select(max_id, dist_dict, avg_rho_range)
+    percent = 2.0
+    position = int(max_id * (max_id + 1) / 2 * percent / 100)
+    dc = sorted(dist_dict.values())[position * 2 + max_id]
+    print('dc=', dc)
 
     rho = [0] * (1 + max_id)
     for i in trange(max_id, desc='local_density'):
         for j in range(i + 1, max_id + 1):
             d = dist_dict[(i, j)]
             if d < dc:
-                rho[i] += 1
-                rho[j] += 1
+                if gauss:
+                    rho[i] += np.exp(- (d / dc) ** 2)
+                    rho[j] += np.exp(- (d / dc) ** 2)
+                else:
+                    rho[i] += 1
+                    rho[j] += 1
 
     return rho, dc
 
@@ -79,7 +81,7 @@ def centrality(max_id, rho, dist_dict):
     :param dist_dict: d(i,j) for i < j
     :return:
     """
-    delta = [-1] * (max_id + 1)
+    delta, neighbor = [-1] * (max_id + 1), [-1] * (max_id + 1)
     sorted_ids = np.argsort(rho)
 
     # assign maximal values to the point with the largest density
@@ -87,11 +89,14 @@ def centrality(max_id, rho, dist_dict):
 
     for i_idx in trange(max_id, desc='centrality'):
         i = sorted_ids[i_idx]
-        delta[i] = min(dist_dict[(i, j)] for j in sorted_ids[i_idx + 1:])
-    return delta
+        nearest = i_idx + 1 + np.argmin([dist_dict[(i, j)] for j in sorted_ids[i_idx + 1:]])
+        neighbor[i] = sorted_ids[nearest]
+        delta[i] = dist_dict[(i, sorted_ids[nearest])]
+        assert min(dist_dict[(i, j)] for j in sorted_ids[i_idx + 1:]) == delta[i]
+    return delta, neighbor
 
 
-def cluster(max_id, rho, delta, dist_dict, rho_threshold, delta_threshold, max_clusters=None, gamma=False,
+def cluster(max_id, rho, delta, neighbor, rho_threshold, delta_threshold, max_clusters=None, gamma=False,
             assign_gap=float('inf'), **kwargs):
     """
     pred_tags: default = -1
@@ -126,15 +131,21 @@ def cluster(max_id, rho, delta, dist_dict, rho_threshold, delta_threshold, max_c
         if idx == 0:
             continue
         if pred_tags[i] < 0:  # smaller id must already be assigned
-            neighbor = None
-            min_dist = float('inf')
-            for j in sorted_ids[:idx]:
-                d = dist_dict[(i, j)]
-                if d < min_dist:
-                    neighbor = j
-                    min_dist = d
-            if min_dist <= assign_gap:
-                pred_tags[i] = pred_tags[neighbor]
+            pred_tags[i] = pred_tags[neighbor[i]]
+
+    # for idx, i in enumerate(sorted_ids):
+    #     if idx == 0:
+    #         continue
+    #     if pred_tags[i] < 0:  # smaller id must already be assigned
+    #         neighbor = None
+    #         min_dist = float('inf')
+    #         for j in sorted_ids[:idx]:
+    #             d = dist_dict[(i, j)]
+    #             if d < min_dist:
+    #                 neighbor = j
+    #                 min_dist = d
+    #         if min_dist <= assign_gap:
+    #             pred_tags[i] = pred_tags[neighbor]
 
             # assert pred_tags[neighbor] >= 0
     assert -1 not in pred_tags
@@ -154,10 +165,11 @@ class DPClustering(object):
 
         self.rho = []
         self.delta = []
+        self.neighbor = []
         self.dc = None
         self.rho_dist = {}
         self.delta_dist = {}
-        self.assign_dist = {}
+        # self.assign_dist = {}
         self.num_pred_clusters = None
         self.rho_threshold = None
         self.delta_threshold = None
@@ -170,6 +182,7 @@ class DPClustering(object):
     def reset(self):
         self.rho = []
         self.delta = []
+        self.neighbor = []
         self.dc = None
         self.num_pred_clusters = None
         self.rho_threshold = None
@@ -179,24 +192,24 @@ class DPClustering(object):
         self.avg_rho_range = (0.05, 0.1)
         self.align = {}
 
-    def run(self, rho_dist, delta_dist, assign_dist=None, **kwargs):
+    def run(self, rho_dist, delta_dist, **kwargs):
         """
         dist_dict: dist_dict[(i, j)] = d(i, j)
         """
-        if assign_dist is None:
-            assign_dist = rho_dist
+        # if assign_dist is None:
+        #     assign_dist = rho_dist
 
         self.reset()
         self.rho_dist = rho_dist
         self.delta_dist = delta_dist
-        self.assign_dist = assign_dist
+        # self.assign_dist = assign_dist
         self.rho_threshold = kwargs.get('rho_threshold')
         self.delta_threshold = kwargs.get('delta_threshold')
         self.avg_rho_range = kwargs.get('avg_rho_range', (0.05, 0.1))
 
-        self.rho, self.dc = local_density(self.max_id, rho_dist, avg_rho_range=self.avg_rho_range)
-        self.delta = centrality(self.max_id, self.rho, delta_dist)
-        self.pred_tags, self.pred_centers = cluster(self.max_id, self.rho, self.delta, self.assign_dist, **kwargs)
+        self.rho, self.dc = local_density(self.max_id, rho_dist, gauss=kwargs.get('gauss', True))
+        self.delta, self.neighbor = centrality(self.max_id, self.rho, delta_dist)
+        self.pred_tags, self.pred_centers = cluster(self.max_id, self.rho, self.delta, self.neighbor, **kwargs)
         self.num_pred_clusters = len(self.pred_centers)
         self.use_km = False
         self.align_prediction()
@@ -211,7 +224,7 @@ class DPClustering(object):
         km = KMeans(n_clusters=n_clusters).fit(data)
         self.pred_tags = km.labels_.tolist()
 
-        self.pred_centers = {np.argmin([np.linalg.norm(x-c) for x in data]): v
+        self.pred_centers = {np.argmin([np.linalg.norm(x - c) for x in data]): v
                              for v, c in enumerate(km.cluster_centers_)}
         self.num_pred_clusters = len(self.pred_centers)
 
@@ -263,7 +276,7 @@ class DPClustering(object):
             pred_clusters[pc] += [idx]
         return true_clusters, pred_clusters
 
-    def plot(self, show=True, threshold=False):
+    def plot(self, show=True, threshold=False, desc=''):
         if self.data.shape[-1] > 2:
             from sklearn.manifold import TSNE
             data = TSNE(n_components=2).fit_transform(self.data)
@@ -273,6 +286,7 @@ class DPClustering(object):
 
         # plots
         fig, ax = plt.subplots(2, 2, figsize=(15, 15))
+        fig.suptitle(desc)
         sns.scatterplot(x=x_, y=y_, hue=[str(_) for _ in self.tags], ax=ax[0, 0])
         ax[0, 0].get_legend().remove()
         ax[0, 0].set_title('data')
@@ -283,7 +297,8 @@ class DPClustering(object):
         sns.scatterplot(x=center_x, y=center_y, ax=ax[1, 0],
                         marker='+', color='black' if not self.use_km else 'red', s=400)
         ax[1, 0].get_legend().remove()
-        ax[1, 0].set_title(f'pred |clusters|={self.num_pred_clusters} ' + f'dc={self.dc}' if self.dc is not None else '')
+        ax[1, 0].set_title(
+            f'pred |clusters|={self.num_pred_clusters} ' + f'dc={self.dc}' if self.dc is not None else '')
 
         sns.scatterplot(x=self.rho, y=self.delta, hue=[str(_) for _ in self.tags], ax=ax[0, 1])
         ax[0, 1].set_xlabel('rho (density)')
@@ -328,7 +343,6 @@ class DPClustering(object):
         p1 = len([_ for _ in g1 if _ not in g2]) / len(g1)
         p2 = len([_ for _ in g2 if _ not in g1]) / len(g2)
         return 0.5 * (p1 + p2)
-
 
 # TODO: create graph version? automatically find # of clusters?
 # TODO: how to initialize centers?  density cutoff -> gauss?
