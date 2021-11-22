@@ -39,23 +39,26 @@ def pairwise_distance(max_id, distFunc, directed=False):
 #     plt.show()
 
 
-def local_density(max_id, dist_dict, dc=None):
+def local_density(max_id, dist_dict, dc=None, avg_rho_range=(0.1, 0.2)):
     """
     dc = None will automatically choose dc as shown in the paper
     """
     if dc is None:
+        avg_rho = 0
         d_max, d_min = max(dist_dict.values()), min(dist_dict.values())
         d_range = d_max - d_min
         while (d_max - d_min) / d_range > 0.001:  # binary search
             dc = (d_max + d_min) / 2
             avg_rho = sum([1 for v in dist_dict.values() if v < dc]) / (max_id + 1) ** 2
-            if avg_rho < 0.1:
+            if avg_rho < avg_rho_range[0]:
                 d_min = dc
-            elif avg_rho > 0.2:
+            elif avg_rho > avg_rho_range[1]:
                 d_max = dc
             else:
                 break
             assert d_max > d_min
+
+        print('avg_rho=', avg_rho)
 
     rho = [0] * (1 + max_id)
     for i in trange(max_id, desc='local_density'):
@@ -89,7 +92,7 @@ def centrality(max_id, rho, dist_dict):
 
 
 def cluster(max_id, rho, delta, dist_dict, rho_threshold, delta_threshold, max_clusters=None, gamma=False,
-            assign_gap=float('inf')):
+            assign_gap=float('inf'), **kwargs):
     """
     pred_tags: default = -1
     """
@@ -116,6 +119,8 @@ def cluster(max_id, rho, delta, dist_dict, rho_threshold, delta_threshold, max_c
                 if max_clusters is not None and len(centers) >= max_clusters:
                     break
 
+    assert centers
+
     # assign points same as nearest neighbor with higher densities
     for idx, i in enumerate(sorted_ids):
         if idx == 0:
@@ -132,7 +137,7 @@ def cluster(max_id, rho, delta, dist_dict, rho_threshold, delta_threshold, max_c
                 pred_tags[i] = pred_tags[neighbor]
 
             # assert pred_tags[neighbor] >= 0
-    # assert -1 not in pred_tags
+    assert -1 not in pred_tags
 
     return pred_tags, centers
 
@@ -158,6 +163,7 @@ class DPClustering(object):
         self.delta_threshold = None
         self.pred_tags = []
         self.pred_centers = {}
+        self.avg_rho_range = (0.05, 0.1)
         self.align = {}
         self.use_km = False
 
@@ -170,6 +176,7 @@ class DPClustering(object):
         self.delta_threshold = None
         self.pred_tags = []
         self.pred_centers = {}
+        self.avg_rho_range = (0.05, 0.1)
         self.align = {}
 
     def run(self, rho_dist, delta_dist, assign_dist=None, **kwargs):
@@ -183,15 +190,12 @@ class DPClustering(object):
         self.rho_dist = rho_dist
         self.delta_dist = delta_dist
         self.assign_dist = assign_dist
-
-        self.rho, self.dc = local_density(self.max_id, rho_dist)
-        self.delta = centrality(self.max_id, self.rho, delta_dist)
-
-        return self.re_cluster(**kwargs)
-
-    def re_cluster(self, **kwargs):
         self.rho_threshold = kwargs.get('rho_threshold')
         self.delta_threshold = kwargs.get('delta_threshold')
+        self.avg_rho_range = kwargs.get('avg_rho_range', (0.05, 0.1))
+
+        self.rho, self.dc = local_density(self.max_id, rho_dist, avg_rho_range=self.avg_rho_range)
+        self.delta = centrality(self.max_id, self.rho, delta_dist)
         self.pred_tags, self.pred_centers = cluster(self.max_id, self.rho, self.delta, self.assign_dist, **kwargs)
         self.num_pred_clusters = len(self.pred_centers)
         self.use_km = False
@@ -325,73 +329,6 @@ class DPClustering(object):
         p2 = len([_ for _ in g2 if _ not in g1]) / len(g2)
         return 0.5 * (p1 + p2)
 
-#
-# if __name__ == '__main__':
-#     def distF(i, j):
-#         return ((x[i] - x[j]) ** 2 + (y[i] - y[j]) ** 2) ** 0.5
-#
-#
-#     length = 100
-#     x = [random.gauss(0, 1) for _ in range(length // 2)] + \
-#         [random.gauss(3, 1) for _ in range(length)] + \
-#         [random.gauss(5, 1) for _ in range(length * 2)]
-#     y = [random.gauss(0, 1) for _ in range(length // 2)] + \
-#         [random.gauss(3, 1) for _ in range(length)] + \
-#         [random.gauss(0, 1) for _ in range(length * 2)]
-#     tag_ = ['0'] * (length // 2) + ['1'] * length + ['2'] * length * 2
-#
-#     in_data = np.array([x, y]).transpose()
-#     DP = DPClustering(in_data, tag_, pairwise_distance(len(x) - 1, distF))
-#     DP.run(3)
-#     DP.plot()
 
-#     import random
-#     import seaborn as sns
-#     from matplotlib import pyplot as plt
-#
-#     length = 100
-#
-#     x = [random.gauss(0, 1) for _ in range(length//2)] + \
-#         [random.gauss(3, 1) for _ in range(length)] + \
-#         [random.gauss(5, 1) for _ in range(length*2)]
-#     y = [random.gauss(0, 1) for _ in range(length//2)] + \
-#         [random.gauss(3, 1) for _ in range(length)] + \
-#         [random.gauss(0, 1) for _ in range(length*2)]
-#     t_ = ['0'] * (length//2) + ['1'] * length + ['2'] * length*2
-#     maxima_id = len(x) - 1
-#
-#     fig, ax = plt.subplots(2, 2, figsize=(15, 15))
-#
-#     sns.scatterplot(x=x, y=y, hue=t_, ax=ax[0, 0])
-#     ax[0, 0].get_legend().remove()
-#     ax[0, 0].set_title('data')
-#
-#
-
-#
-#     d_ = pairwise_distance(maxima_id, distF)
-#     rho_, dc_ = local_density(maxima_id, d_)
-#     delta_ = centrality(maxima_id, rho_, d_)
-#     pre_t, centers = cluster(maxima_id, rho_, delta_, d_, num_clusters=3)
-#
-#
-#     # plots
-#     sns.scatterplot(x=rho_, y=delta_, hue=t_, ax=ax[0, 1])
-#     ax[0, 1].get_legend().remove()
-#     ax[0, 1].set_title('delta-rho')
-#
-#     gamma = np.array(rho_) * np.array(delta_)
-#     gamma.sort()
-#     sns.scatterplot(x=range(len(gamma)), y=gamma[::-1], ax=ax[1, 1])
-#     ax[1, 1].set_title('gamma')
-#
-#     sns.scatterplot(x=x, y=y, hue=[str(_) for _ in pre_t], ax=ax[1, 0])
-#     center_x = [x[c] for c in centers.keys()]
-#     center_y = [y[c] for c in centers.keys()]
-#     sns.scatterplot(x=center_x, y=center_y, ax=ax[1, 0], marker='+', color='black', s=400)
-#     ax[1, 0].get_legend().remove()
-#     ax[1, 0].set_title(f'pred, dc={dc_}')
-#     fig.show()
-#
 # TODO: create graph version? automatically find # of clusters?
 # TODO: how to initialize centers?  density cutoff -> gauss?

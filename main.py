@@ -1,4 +1,4 @@
-
+import json
 import random
 import numpy as np
 import scipy
@@ -65,16 +65,17 @@ def SpectralDP(G, pos, tags, N_communities, desc='Karate', **kwargs):
            max_clusters=N_communities,
            rho_threshold=kwargs.get('rho_threshold', 5),
            delta_threshold=kwargs.get('delta_threshold', 0.2),
-           gamma=use_gamma)
+           gamma=use_gamma,
+           avg_rho_range=kwargs.get('avg_rho_range', (0.01, 0.02)))
 
     run_fig, run_ax = DP.plot(show=False, threshold=not use_gamma)
     if kwargs.get('plot_edge', True):
         nx.draw_networkx_edges(G, pos,
-                               alpha=kwargs.get('alpha', 0.2),
+                               alpha=kwargs.get('alpha', 0.1),
                                width=kwargs.get('width', 1),
                                ax=run_ax[0, 0])
         nx.draw_networkx_edges(G, pos,
-                               alpha=kwargs.get('alpha', 0.2),
+                               alpha=kwargs.get('alpha', 0.1),
                                width=kwargs.get('width', 1),
                                ax=run_ax[1, 0])
     run_fig.show()
@@ -92,12 +93,16 @@ def rand_cluster():
     # G = nx.planted_partition_graph(5, 10, 0.5, 0.1, seed=0)
     tags = [G.nodes[v]['block'] for v in G]
 
+    # for plots only
+    for e in G.edges:
+        G.edges[e]['weight'] = 1 if tags[e[0]] == tags[e[1]] else 0.4
+
     N_communities = len(set(tags))
     pos = nx.spring_layout(G)
 
     # Spectral Density Peak Clustering
     dp, embed = SpectralDP(G, pos, tags, N_communities, desc='Rand',
-                           gamma=False, rho_threshold=2, delta_threshold=0.3)
+                           gamma=False, rho_threshold=2, delta_threshold=0.3, avg_rho_range=(0.1, 0.2))
     print(dp.eval())
 
     # compare to k-means
@@ -119,7 +124,7 @@ def karate_cluster():
 
     # Spectral Density Peak Clustering
     dp, embed = SpectralDP(G, pos, tags, N_communities, desc='Karate',
-                           gamma=True, rho_threshold=5, delta_threshold=1.1)
+                           gamma=False, rho_threshold=5, delta_threshold=0.15, avg_rho_range=(0.1, 0.2))
     print(dp.eval())
 
     # compare to k-means
@@ -155,14 +160,14 @@ def email_cluster():
 
     # for plots only
     for e in G.edges:
-        G.edges[e]['weight'] = 0.1 if communities[e[0]] == communities[e[1]] else 0.001
+        G.edges[e]['weight'] = 0.05 if communities[e[0]] == communities[e[1]] else 0.001
 
     pos = nx.spring_layout(G)
     tags = [communities[v] for v in G]
 
     # Spectral Density Peak Clustering
     dp, embed = SpectralDP(G, pos, tags, N_communities, desc='Email', node_size=10, label=False, plot_edge=False,
-                           gamma=True, rho_threshold=0, delta_threshold=1.5)
+                           gamma=True, rho_threshold=0, delta_threshold=1.5, avg_rho_range=(0.005, 0.01))
     print(dp.eval())
 
     # compare to k-means
@@ -187,32 +192,23 @@ def facebook_cluster():
     str_nodes_int = {k: v for v, k in enumerate(str_nodes)}
     G = nx.relabel_nodes(G, str_nodes_int)
 
-    communities = {}
-
-    with open('data/egos.txt') as f:
-        egos = f.readline().split(' ')
-
-    for i, e in enumerate(egos):
-        communities[str_nodes_int[e]] = i
-        with open(f'data/{e}.feat') as f:
-            for s in [_.split(' ')[0] for _ in f.readlines()]:
-                communities[str_nodes_int[s]] = i
+    with open('data/fb_tags.txt', 'r') as f:
+        content = f.read()
+        communities = eval(content)
 
     N_communities = len(set(communities.values()))
 
     # for plots only
     for e in G.edges:
-        G.edges[e]['weight'] = 0.1 if communities[e[0]] == communities[e[1]] else 0.001
+        G.edges[e]['weight'] = 0.05 if communities[e[0]] == communities[e[1]] else 0.001
 
     pos = nx.spring_layout(G)
     tags = [communities[v] for v in G]
 
     # Spectral Density Peak Clustering
     dp, embed = SpectralDP(G, pos, tags, N_communities, desc='Facebook', node_size=10, label=False, plot_edge=False,
-                           gamma=True, rho_threshold=100, delta_threshold=0.02)
+                           gamma=True, rho_threshold=100, delta_threshold=0.02,  avg_rho_range=(0.005, 0.01))
     print(dp.eval())
-
-    # dp.re_cluster(gamma=False, rho_threshold=100, delta_threshold=0.02)
 
     # compare to k-means
     dp.k_means(embed, N_communities)
@@ -220,58 +216,3 @@ def facebook_cluster():
     fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags],
                           desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}', node_size=10, label=False)
     fig.savefig(f'results/fb_k_means.png')
-
-
-# def com_cluster():
-#     """
-#     too large...
-#     :return:
-#     """
-#
-#     with open('data/youtube5000.txt', 'rb') as f:
-#         G = nx.read_adjlist(f)
-#     G.remove_edges_from(nx.selfloop_edges(G))
-#     G.remove_nodes_from(list(nx.isolates(G)))
-#
-#     # largest component
-#     Gcc = sorted(nx.connected_components(G), key=len, reverse=True)
-#     G = G.subgraph(Gcc[0])
-#     str_nodes = list(G.nodes)
-#     str_nodes.sort(key=lambda x: int(x))
-#     str_nodes_int = {k: v for v, k in enumerate(str_nodes)}
-#     G = nx.relabel_nodes(G, str_nodes_int)
-#
-#     communities = {}
-#     with open('data/youtube5000.txt') as f:
-#         for c, l in enumerate(f.readlines()):
-#             for k in l[:-1].split('\t'):
-#                 if k in str_nodes_int:
-#                     communities[str_nodes_int[k]] = c
-#
-#     N_communities = len(set(communities.values()))
-#     tags = [communities[v] for v in G]
-#
-#     def distF(i, j):
-#         return nx.shortest_path_length(G, i, j)
-#
-#     # Density Peak Clustering
-#     max_id = len(G.nodes) - 1
-#     DP = DPClustering(np.zeros((2, 2)), tags)
-#     dist_dict = pairwise_distance(max_id, distF)
-#     DP.run(rho_threshold=100, delta_threshold=2,
-#            rho_dist=dist_dict,
-#            delta_dist=dist_dict,
-#            assign_dist=dist_dict,
-#            max_clusters=N_communities,
-#            gamma=True)
-
-# trans = np.array([[0, 1/2, 1/4, 0, 1/2],
-#                   [1/3, 0, 1/4, 0, 0],
-#                   [1/3, 1/2, 0, 1, 1/2],
-#                   [0, 0, 1/4, 0, 0],
-#                   [1/3, 0, 1/4, 0, 0]])
-#
-# s = np.array([0, 0, 0, 0, 1])
-#
-# for i in range(100):
-#     s = trans.__matmul__(s)
