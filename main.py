@@ -300,3 +300,7 @@ def facebook_cluster():
     fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags],
                           desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}', node_size=10, label=False)
     fig.savefig(f'results/fb_k_means.png')
+
+
+if __name__ == '__main__':
+    karate_cluster()

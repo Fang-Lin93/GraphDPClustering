@@ -349,5 +349,3 @@ class DPClustering(object):
         p2 = len([_ for _ in g2 if _ not in g1]) / len(g2)
         return 0.5 * (p1 + p2)
 
-# TODO: create graph version? automatically find # of clusters?
-# TODO: how to initialize centers?  density cutoff -> gauss?
