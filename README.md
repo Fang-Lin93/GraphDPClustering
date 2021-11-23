@@ -7,16 +7,16 @@ Datasets are from [SNAP](https://snap.stanford.edu/data/).
 
 Zachary’s Karate Club network:
 
-<img src="https://github.com/Fang-Lin93/GraphDPClustering/blob/main/data/results/karete_dp.png"  width=" 40%"></img>
+<img src="https://github.com/Fang-Lin93/GraphDPClustering/blob/main/results/karate_dp.png"  width=" 40%"></img>
 
 Email-Eu-core network:
 
 <img src="https://github.com/Fang-Lin93/GraphDPClustering/blob/main/results/email_dp.png"  width=" 40%"></img>
 
-<img src="https://github.com/Fang-Lin93/GraphDPClustering/blob/main/data/results/email_large.png"  width=" 40%"></img>
+<img src="https://github.com/Fang-Lin93/GraphDPClustering/blob/main/results/email_large.png"  width=" 40%"></img>
 
 Social circles: Facebook ego network
 
-<img src="https://github.com/Fang-Lin93/GraphDPClustering/blob/main/data/results/facebook_dp.png"  width=" 40%"></img>
+<img src="https://github.com/Fang-Lin93/GraphDPClustering/blob/main/results/facebook_dp.png"  width=" 40%"></img>
 
-<img src="https://github.com/Fang-Lin93/GraphDPClustering/blob/main/data/results/facebook_large.png"  width=" 40%"></img>
+<img src="https://github.com/Fang-Lin93/GraphDPClustering/blob/main/results/facebook_large.png"  width=" 40%"></img>
