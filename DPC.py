@@ -47,57 +47,55 @@ def range_dc_select(max_id, dist_dict, avg_rho_range=(0.01, 0.02)):
     return dc
 
 
-def local_density(max_id, dist_dict, gauss=True):
+def local_density(max_id, dist_dict, gauss=True, percent=2.0, cut_gauss=False):
     """
     dc = None will automatically choose dc as shown in the paper
     """
     # if dc is None:
     #     range_dc_select(max_id, dist_dict, avg_rho_range)
-    percent = 2.0
     position = int(max_id * (max_id + 1) / 2 * percent / 100)
     dc = sorted(dist_dict.values())[position * 2 + max_id]
-    print('dc=', dc)
+    print(f'dc={dc} (percentage = {percent})')
 
     rho = [0] * (1 + max_id)
     for i in trange(max_id, desc='local_density'):
         for j in range(i + 1, max_id + 1):
             d = dist_dict[(i, j)]
-            if d < dc:
-                if gauss:
+            if gauss:
+                if (cut_gauss and d < dc) or not cut_gauss:
                     rho[i] += np.exp(- (d / dc) ** 2)
                     rho[j] += np.exp(- (d / dc) ** 2)
-                else:
+            else:
+                if d < dc:
                     rho[i] += 1
                     rho[j] += 1
 
     return rho, dc
 
 
-def centrality(max_id, rho, dist_dict):
+def centrality(max_id, rho, dist_dict, assign_gap=float('inf')):
     """
     use sorts
-    :param max_id:
-    :param rho:
-    :param dist_dict: d(i,j) for i < j
-    :return:
+    dist_dict: d(i,j) for i < j
     """
     delta, neighbor = [-1] * (max_id + 1), [-1] * (max_id + 1)
     sorted_ids = np.argsort(rho)
 
     # assign maximal values to the point with the largest density
-    delta[sorted_ids[-1]] = max(dist_dict.values())
+    delta[sorted_ids[-1]] = max(dist_dict[(sorted_ids[-1], j)] for j in sorted_ids[:-1])  # max(dist_dict.values())
 
     for i_idx in trange(max_id, desc='centrality'):
         i = sorted_ids[i_idx]
         nearest = i_idx + 1 + np.argmin([dist_dict[(i, j)] for j in sorted_ids[i_idx + 1:]])
-        neighbor[i] = sorted_ids[nearest]
-        delta[i] = dist_dict[(i, sorted_ids[nearest])]
+        near_dist = dist_dict[(i, sorted_ids[nearest])]
+        neighbor[i] = sorted_ids[nearest] if near_dist < assign_gap else -1
+        delta[i] = near_dist
         assert min(dist_dict[(i, j)] for j in sorted_ids[i_idx + 1:]) == delta[i]
     return delta, neighbor
 
 
-def cluster(max_id, rho, delta, neighbor, rho_threshold, delta_threshold, max_clusters=None, gamma=False,
-            assign_gap=float('inf'), **kwargs):
+def cluster(max_id, rho, delta, neighbor, rho_threshold=None, delta_threshold=None, max_clusters=None, gamma=False,
+            **kwargs):
     """
     pred_tags: default = -1
     """
@@ -106,6 +104,9 @@ def cluster(max_id, rho, delta, neighbor, rho_threshold, delta_threshold, max_cl
     centers = {}
     rho = np.array(rho)
     sorted_ids = rho.argsort()[::-1]
+
+    # either use gamma or rho+delta
+    assert gamma or rho_threshold and delta_threshold
 
     # use ranked gamma to select centers: gamma=True, max_clusters=?
     if gamma:
@@ -130,7 +131,7 @@ def cluster(max_id, rho, delta, neighbor, rho_threshold, delta_threshold, max_cl
     for idx, i in enumerate(sorted_ids):
         if idx == 0:
             continue
-        if pred_tags[i] < 0:  # smaller id must already be assigned
+        if pred_tags[i] < 0 and neighbor[i] > -1:  # smaller id must already be assigned
             pred_tags[i] = pred_tags[neighbor[i]]
 
     # for idx, i in enumerate(sorted_ids):
@@ -148,7 +149,7 @@ def cluster(max_id, rho, delta, neighbor, rho_threshold, delta_threshold, max_cl
     #             pred_tags[i] = pred_tags[neighbor]
 
             # assert pred_tags[neighbor] >= 0
-    assert -1 not in pred_tags
+    # assert -1 not in pred_tags
 
     return pred_tags, centers
 
@@ -207,8 +208,12 @@ class DPClustering(object):
         self.delta_threshold = kwargs.get('delta_threshold')
         self.avg_rho_range = kwargs.get('avg_rho_range', (0.05, 0.1))
 
-        self.rho, self.dc = local_density(self.max_id, rho_dist, gauss=kwargs.get('gauss', True))
-        self.delta, self.neighbor = centrality(self.max_id, self.rho, delta_dist)
+        self.rho, self.dc = local_density(self.max_id, rho_dist,
+                                          gauss=kwargs.get('gauss', True),
+                                          percent=kwargs.get('percent', 2.0),
+                                          cut_gauss=kwargs.get('cut_gauss', False))
+        self.delta, self.neighbor = centrality(self.max_id, self.rho, delta_dist,
+                                               assign_gap=kwargs.get('assign_gap', float('inf')))
         self.pred_tags, self.pred_centers = cluster(self.max_id, self.rho, self.delta, self.neighbor, **kwargs)
         self.num_pred_clusters = len(self.pred_centers)
         self.use_km = False
@@ -287,11 +292,11 @@ class DPClustering(object):
         # plots
         fig, ax = plt.subplots(2, 2, figsize=(15, 15))
         fig.suptitle(desc)
-        sns.scatterplot(x=x_, y=y_, hue=[str(_) for _ in self.tags], ax=ax[0, 0])
+        sns.scatterplot(x=x_, y=y_, hue=[str(_) if _ != -1 else '-1' for _ in self.tags], ax=ax[0, 0])
         ax[0, 0].get_legend().remove()
         ax[0, 0].set_title('data')
 
-        sns.scatterplot(x=x_, y=y_, hue=[str(self.align[_]) for _ in self.pred_tags], ax=ax[1, 0])
+        sns.scatterplot(x=x_, y=y_, hue=[str(self.align[_]) if _ != -1 else '-1' for _ in self.pred_tags], ax=ax[1, 0])
         center_x = [x_[c] for c in self.pred_centers.keys()]
         center_y = [y_[c] for c in self.pred_centers.keys()]
         sns.scatterplot(x=center_x, y=center_y, ax=ax[1, 0],
@@ -300,7 +305,7 @@ class DPClustering(object):
         ax[1, 0].set_title(
             f'pred |clusters|={self.num_pred_clusters} ' + f'dc={self.dc}' if self.dc is not None else '')
 
-        sns.scatterplot(x=self.rho, y=self.delta, hue=[str(_) for _ in self.tags], ax=ax[0, 1])
+        sns.scatterplot(x=self.rho, y=self.delta, hue=[str(_) if _ != -1 else '-1' for _ in self.tags], ax=ax[0, 1])
         ax[0, 1].set_xlabel('rho (density)')
         ax[0, 1].set_ylabel('delta (centrality)')
         if threshold:
