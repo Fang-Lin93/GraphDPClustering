@@ -48,7 +48,7 @@ def cluster_plot(G, pos, true_tags, pred_tags, node_size=400, edge_width=1, labe
     if label:
         nx.draw_networkx_labels(G, pos, dict(zip(G.nodes, G.nodes)), font_color="whitesmoke", ax=ax[1])
     ax[1].set_title(f'Prediction {desc}')
-    fig.savefig('results/Karate_large.png')
+    # fig.savefig(f'results/{desc}_large.png')
     if show:
         fig.show()
     return fig, ax
@@ -152,10 +152,10 @@ def rand_cluster():
     fig.savefig(f'results/rand_k_means.png')
 
     # compare to k-means
-    # dp.k_means(embed, N_communities)
-    # entropy, purity = dp.eval()
-    # fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags], desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}')
-    # fig.savefig(f'results/rand_k_means.png')
+    dp.k_means(embed, N_communities)
+    entropy, purity = dp.eval()
+    fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags], desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}')
+    fig.savefig(f'results/rand_k_means_large.png')
 
 
 def karate_cluster():
@@ -191,7 +191,7 @@ def karate_cluster():
     dp.k_means(embed, N_communities)
     entropy, purity = dp.eval()
     fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags], desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}')
-    fig.savefig(f'results/karate_k_means.png')
+    fig.savefig(f'results/karate_k_means_large.png')
 
 
 def email_cluster():
@@ -226,7 +226,7 @@ def email_cluster():
     tags = [communities[v] for v in G]
 
     # Spectral Density Peak Clustering
-    dp, embed = SpectralDP(G, pos, tags, N_communities, desc='Email', node_size=10, label=False, plot_edge=False,
+    dp, embed = SpectralDP(G, pos, tags, N_communities, desc='email', node_size=10, label=False, plot_edge=False,
                            gamma=True,  percent=1., gauss=True, cut_gauss=True)
     print(dp.eval())
 
@@ -247,7 +247,7 @@ def email_cluster():
     entropy, purity = dp.eval()
     fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags],
                           desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}', node_size=10, label=False)
-    fig.savefig(f'results/email_k_means.png')
+    fig.savefig(f'results/email_k_means_large.png')
 
 
 def facebook_cluster():
@@ -299,7 +299,7 @@ def facebook_cluster():
     entropy, purity = dp.eval()
     fig, _ = cluster_plot(G, pos, tags, [dp.align[_] for _ in dp.pred_tags],
                           desc=f'K-means: entropy={entropy:.3f}, purity={purity:.3f}', node_size=10, label=False)
-    fig.savefig(f'results/fb_k_means.png')
+    fig.savefig(f'results/facebook_k_means_large.png')
 
 
 if __name__ == '__main__':
