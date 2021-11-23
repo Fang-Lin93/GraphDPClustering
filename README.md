@@ -1,7 +1,7 @@
 # GraphDPClustering
 Graph density peak clustering - heuristic work
 
-Run functions in main.py
+Run functions in `main.py`
 
 Datasets are from [SNAP](https://snap.stanford.edu/data/) and [DP paper](https://github.com/jasonwbw/DensityPeakCluster).
 
